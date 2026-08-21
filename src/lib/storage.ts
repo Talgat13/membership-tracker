@@ -2,9 +2,10 @@ import { MappingRule, ClubMember, BankTransaction } from './types';
 
 const STORAGE_KEYS = {
   RULES: 'membership_tracker_custom_rules_v1',
-  DEFAULT_FEE: 'membership_tracker_default_fee_v1',
   MEMBERS_CACHE: 'membership_tracker_cached_members_v1',
   TRANSACTIONS_CACHE: 'membership_tracker_cached_txs_v1',
+  MEMBERS_FILENAME: 'membership_tracker_members_filename_v1',
+  TRANSACTIONS_FILENAME: 'membership_tracker_txs_filename_v1',
   MANUAL_OVERRIDES: 'membership_tracker_overrides_v1',
 };
 
@@ -53,61 +54,68 @@ export function deleteMappingRule(ruleId: string): void {
   saveRules(updated);
 }
 
-export function loadDefaultFee(fallback = 110): number {
-  if (typeof window === 'undefined') return fallback;
-  try {
-    const val = localStorage.getItem(STORAGE_KEYS.DEFAULT_FEE);
-    if (!val) return fallback;
-    const num = parseFloat(val);
-    return isNaN(num) ? fallback : num;
-  } catch {
-    return fallback;
-  }
-}
-
-export function saveDefaultFee(fee: number): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(STORAGE_KEYS.DEFAULT_FEE, String(fee));
-  } catch (e) {
-    console.error('Failed to save default fee to localStorage', e);
-  }
-}
-
 export function loadCachedData(): {
   members: ClubMember[] | null;
   transactions: BankTransaction[] | null;
+  membersFileName: string | null;
+  transactionsFileName: string | null;
   overrides: Record<string, string>;
 } {
-  if (typeof window === 'undefined') return { members: null, transactions: null, overrides: {} };
+  if (typeof window === 'undefined') {
+    return {
+      members: null,
+      transactions: null,
+      membersFileName: null,
+      transactionsFileName: null,
+      overrides: {},
+    };
+  }
   try {
     const memRaw = localStorage.getItem(STORAGE_KEYS.MEMBERS_CACHE);
     const txRaw = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS_CACHE);
+    const memFile = localStorage.getItem(STORAGE_KEYS.MEMBERS_FILENAME);
+    const txFile = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS_FILENAME);
     const ovRaw = localStorage.getItem(STORAGE_KEYS.MANUAL_OVERRIDES);
 
     return {
       members: memRaw ? JSON.parse(memRaw) : null,
       transactions: txRaw ? JSON.parse(txRaw) : null,
+      membersFileName: memFile || null,
+      transactionsFileName: txFile || null,
       overrides: ovRaw ? JSON.parse(ovRaw) : {},
     };
   } catch (e) {
-    console.error('Failed to load cached session', e);
-    return { members: null, transactions: null, overrides: {} };
+    console.error('Failed to load cached session from localStorage', e);
+    return {
+      members: null,
+      transactions: null,
+      membersFileName: null,
+      transactionsFileName: null,
+      overrides: {},
+    };
   }
 }
 
 export function saveCachedData(
   members: ClubMember[] | null,
   transactions: BankTransaction[] | null,
+  membersFileName?: string | null,
+  transactionsFileName?: string | null,
   overrides?: Record<string, string>
 ): void {
   if (typeof window === 'undefined') return;
   try {
-    if (members) {
+    if (members && members.length > 0) {
       localStorage.setItem(STORAGE_KEYS.MEMBERS_CACHE, JSON.stringify(members));
+      if (membersFileName) {
+        localStorage.setItem(STORAGE_KEYS.MEMBERS_FILENAME, membersFileName);
+      }
     }
-    if (transactions) {
+    if (transactions && transactions.length > 0) {
       localStorage.setItem(STORAGE_KEYS.TRANSACTIONS_CACHE, JSON.stringify(transactions));
+      if (transactionsFileName) {
+        localStorage.setItem(STORAGE_KEYS.TRANSACTIONS_FILENAME, transactionsFileName);
+      }
     }
     if (overrides) {
       localStorage.setItem(STORAGE_KEYS.MANUAL_OVERRIDES, JSON.stringify(overrides));
@@ -117,11 +125,33 @@ export function saveCachedData(
   }
 }
 
+export function clearMembersCache(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEYS.MEMBERS_CACHE);
+    localStorage.removeItem(STORAGE_KEYS.MEMBERS_FILENAME);
+  } catch (e) {
+    console.error('Failed to clear members cache', e);
+  }
+}
+
+export function clearTransactionsCache(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS_CACHE);
+    localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS_FILENAME);
+  } catch (e) {
+    console.error('Failed to clear transactions cache', e);
+  }
+}
+
 export function clearCachedSession(): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem(STORAGE_KEYS.MEMBERS_CACHE);
     localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS_CACHE);
+    localStorage.removeItem(STORAGE_KEYS.MEMBERS_FILENAME);
+    localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS_FILENAME);
     localStorage.removeItem(STORAGE_KEYS.MANUAL_OVERRIDES);
   } catch (e) {
     console.error('Failed to clear cached session', e);

@@ -3,7 +3,6 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import {
   CreditCard,
-  Sparkles,
   RotateCcw,
   Sliders,
   Sun,
@@ -12,7 +11,6 @@ import {
 } from 'lucide-react';
 
 interface HeaderProps {
-  onLoadSamples: () => void;
   onReset: () => void;
   onOpenRules: () => void;
   rulesCount: number;
@@ -22,7 +20,6 @@ interface HeaderProps {
 }
 
 export function Header({
-  onLoadSamples,
   onReset,
   onOpenRules,
   rulesCount,
@@ -82,16 +79,7 @@ export function Header({
             )}
           </button>
 
-          <button
-            onClick={onLoadSamples}
-            type="button"
-            className="inline-flex items-center px-3 py-1.5 rounded-xl text-xs sm:text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-            title="Load sample data from data-samples folder"
-          >
-            <Sparkles className="w-4 h-4 mr-1.5 text-emerald-200" />
-            <span>Load Demo</span>
-          </button>
-
+          {/* Rules Manager Button */}
           <button
             onClick={onOpenRules}
             type="button"
@@ -106,6 +94,7 @@ export function Header({
             )}
           </button>
 
+          {/* Reset / Clear Button */}
           {hasData && (
             <button
               onClick={onReset}

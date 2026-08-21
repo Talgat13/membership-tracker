@@ -10,12 +10,6 @@ import { TransactionModal } from '@/components/TransactionModal';
 import { RulesManagerModal } from '@/components/RulesManagerModal';
 import {
   UploadCloud,
-  FileSpreadsheet,
-  Users,
-  Sparkles,
-  ArrowRight,
-  ShieldCheck,
-  CheckCircle2,
 } from 'lucide-react';
 
 import {
@@ -27,12 +21,12 @@ import {
 import { reconcileStatements } from '@/lib/matcher';
 import { exportReconciliationToExcel } from '@/lib/export';
 import {
-  SAMPLE_ACTIVE_MEMBERS,
-  SAMPLE_BANK_TRANSACTIONS,
-} from '@/lib/sample-data';
-import {
   loadSavedRules,
   addMappingRule,
+  loadCachedData,
+  saveCachedData,
+  clearMembersCache,
+  clearTransactionsCache,
   clearCachedSession,
 } from '@/lib/storage';
 
@@ -56,8 +50,9 @@ export default function Home() {
     useState<MemberReconciliation | null>(null);
   const [isRulesModalOpen, setIsRulesModalOpen] = useState<boolean>(false);
 
-  // Initialize theme and saved rules (clean start without preloaded demo data)
+  // Initialize theme, saved rules, and restore user data from localStorage
   useEffect(() => {
+    // 1. Theme setup
     const savedTheme = localStorage.getItem('membership_tracker_theme') as 'dark' | 'light' | null;
     const initialTheme = savedTheme || 'dark';
     setTheme(initialTheme);
@@ -67,9 +62,27 @@ export default function Home() {
       document.documentElement.classList.remove('dark');
     }
 
-    // Rules from localStorage
+    // 2. Rules from localStorage
     const savedRules = loadSavedRules();
     setRules(savedRules);
+
+    // 3. Restore persisted files and overrides from localStorage
+    const cached = loadCachedData();
+    if (cached.members && cached.members.length > 0) {
+      setMembers(cached.members);
+      if (cached.membersFileName) {
+        setMembersFileName(cached.membersFileName);
+      }
+    }
+    if (cached.transactions && cached.transactions.length > 0) {
+      setTransactions(cached.transactions);
+      if (cached.transactionsFileName) {
+        setTransactionsFileName(cached.transactionsFileName);
+      }
+    }
+    if (cached.overrides && Object.keys(cached.overrides).length > 0) {
+      setManualOverrides(cached.overrides);
+    }
   }, []);
 
   const toggleTheme = () => {
@@ -142,14 +155,29 @@ export default function Home() {
     });
   }, [reconciledMembers, searchQuery, statusFilter]);
 
-  // Actions
-  const handleLoadSamples = () => {
-    setMembers(SAMPLE_ACTIVE_MEMBERS);
-    setTransactions(SAMPLE_BANK_TRANSACTIONS);
-    setMembersFileName('Active_შპს_ბასა_2026-08-03.xlsx (Demo)');
-    setTransactionsFileName('Report 20.07.26-03.08.26.xlsx (Demo)');
-    setSelectedMonth('all');
-    setManualOverrides({});
+  // File loading and clearing with automatic localStorage sync
+  const handleMembersLoaded = (newMembers: ClubMember[], filename: string) => {
+    setMembers(newMembers);
+    setMembersFileName(filename);
+    saveCachedData(newMembers, transactions, filename, transactionsFileName, manualOverrides);
+  };
+
+  const handleTransactionsLoaded = (newTxs: BankTransaction[], filename: string) => {
+    setTransactions(newTxs);
+    setTransactionsFileName(filename);
+    saveCachedData(members, newTxs, membersFileName, filename, manualOverrides);
+  };
+
+  const handleClearMembers = () => {
+    setMembers([]);
+    setMembersFileName('');
+    clearMembersCache();
+  };
+
+  const handleClearTransactions = () => {
+    setTransactions([]);
+    setTransactionsFileName('');
+    clearTransactionsCache();
   };
 
   const handleReset = () => {
@@ -161,16 +189,6 @@ export default function Home() {
     clearCachedSession();
   };
 
-  const handleMembersLoaded = (newMembers: ClubMember[], filename: string) => {
-    setMembers(newMembers);
-    setMembersFileName(filename);
-  };
-
-  const handleTransactionsLoaded = (newTxs: BankTransaction[], filename: string) => {
-    setTransactions(newTxs);
-    setTransactionsFileName(filename);
-  };
-
   const handleManualBind = (
     tx: BankTransaction,
     member: ClubMember,
@@ -178,6 +196,7 @@ export default function Home() {
   ) => {
     const newOverrides = { ...manualOverrides, [tx.id]: member.id };
     setManualOverrides(newOverrides);
+    saveCachedData(members, transactions, membersFileName, transactionsFileName, newOverrides);
 
     if (saveRule) {
       const pattern = tx.cleanSenderName || tx.senderName;
@@ -200,6 +219,7 @@ export default function Home() {
     const newOverrides = { ...manualOverrides };
     delete newOverrides[transactionId];
     setManualOverrides(newOverrides);
+    saveCachedData(members, transactions, membersFileName, transactionsFileName, newOverrides);
 
     if (selectedMemberForModal) {
       const updated = reconciledMembers.find(
@@ -224,7 +244,6 @@ export default function Home() {
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
       {/* Top Header */}
       <Header
-        onLoadSamples={handleLoadSamples}
         onReset={handleReset}
         onOpenRules={() => setIsRulesModalOpen(true)}
         rulesCount={rules.length}
@@ -241,14 +260,8 @@ export default function Home() {
           transactions={transactions}
           onMembersLoaded={handleMembersLoaded}
           onTransactionsLoaded={handleTransactionsLoaded}
-          onClearMembers={() => {
-            setMembers([]);
-            setMembersFileName('');
-          }}
-          onClearTransactions={() => {
-            setTransactions([]);
-            setTransactionsFileName('');
-          }}
+          onClearMembers={handleClearMembers}
+          onClearTransactions={handleClearTransactions}
           membersFileName={membersFileName}
           transactionsFileName={transactionsFileName}
         />
@@ -311,18 +324,6 @@ export default function Home() {
                   Instant Georgian transliteration, fuzzy matching, and exportable report.
                 </p>
               </div>
-            </div>
-
-            {/* Quick Demo Shortcut */}
-            <div className="pt-4">
-              <button
-                type="button"
-                onClick={handleLoadSamples}
-                className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 transition-colors shadow-xs cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4 text-emerald-500" />
-                <span>Or click here to load sample demo data</span>
-              </button>
             </div>
           </div>
         ) : (
