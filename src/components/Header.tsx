@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import {
   CreditCard,
   Sparkles,
@@ -7,6 +8,7 @@ import {
   Sliders,
   Sun,
   Moon,
+  LogOut,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -28,6 +30,18 @@ export function Header({
   theme,
   onToggleTheme,
 }: HeaderProps) {
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth', { method: 'DELETE' });
+      router.push('/login');
+      router.refresh();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   return (
     <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-40 shadow-xs transition-colors duration-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -102,6 +116,16 @@ export function Header({
               <RotateCcw className="w-4 h-4" />
             </button>
           )}
+
+          {/* Logout / Lock Button */}
+          <button
+            onClick={handleLogout}
+            type="button"
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition-colors cursor-pointer"
+            title="Lock application (Log out)"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </header>
