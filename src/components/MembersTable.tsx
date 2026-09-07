@@ -112,7 +112,7 @@ export function MembersTable({
                 </div>
               </th>
 
-              <th className="py-3.5 px-4 text-left">Transactions & Statement Senders</th>
+              <th className="py-3.5 px-4 text-left">Matched Transactions (Bank, Sender, Date)</th>
               <th className="py-3.5 px-4 text-center">Actions</th>
             </tr>
           </thead>
@@ -135,12 +135,17 @@ export function MembersTable({
                   <td className="py-3.5 px-4">
                     <div className="flex items-center space-x-3">
                       <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold flex items-center justify-center text-xs flex-shrink-0">
-                        {row.member.firstName.charAt(0)}
-                        {row.member.lastName.charAt(0)}
+                        {row.member.firstName ? row.member.firstName.charAt(0).toUpperCase() : ''}
+                        {row.member.lastName ? row.member.lastName.charAt(0).toUpperCase() : ''}
                       </div>
                       <div>
-                        <div className="font-semibold text-slate-900 dark:text-slate-100 capitalize">
+                        <div className="font-semibold text-slate-900 dark:text-slate-100">
                           {row.member.fullName}
+                          {row.member.fullNameLatin && row.member.fullNameLatin !== row.member.fullName && (
+                            <span className="ml-1.5 text-xs font-normal text-slate-500 dark:text-slate-400">
+                              ({row.member.fullNameLatin})
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400">
                           {row.member.status}
@@ -181,20 +186,29 @@ export function MembersTable({
                   {/* Transactions list */}
                   <td className="py-3.5 px-4">
                     {row.transactions.length > 0 ? (
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate max-w-sm">
-                            {row.transactions
-                              .map((t) => `${t.amount} ₾ (${t.date})`)
-                              .join(', ')}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-sm">
-                          {row.transactions
-                            .map((t) => t.senderName || t.payerName)
-                            .filter(Boolean)
-                            .join('; ')}
-                        </div>
+                      <div className="space-y-1.5 max-w-md">
+                        {row.transactions.map((t, idx) => (
+                          <div key={t.id || idx} className="flex items-center space-x-1.5 text-xs truncate">
+                            <span
+                              className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                t.bank === 'TBC'
+                                  ? 'bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-400'
+                                  : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-400'
+                              }`}
+                            >
+                              {t.bank || 'Bank'}
+                            </span>
+                            <span className="font-semibold text-slate-900 dark:text-slate-200">
+                              {t.amount} ₾
+                            </span>
+                            <span className="text-slate-400 dark:text-slate-500 text-[11px]">
+                              ({t.date})
+                            </span>
+                            <span className="text-slate-600 dark:text-slate-400 text-[11px] truncate">
+                              • {t.senderName || t.payerName}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     ) : (
                       <span className="text-slate-400 dark:text-slate-600 text-xs italic">

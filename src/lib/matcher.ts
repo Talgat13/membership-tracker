@@ -11,6 +11,7 @@ import {
   normalizeForComparison,
   tokenizeAndSort,
   cleanPurposeText,
+  transliterateGeorgian,
 } from './transliteration';
 
 /**
@@ -68,26 +69,39 @@ export function matchTransaction(
 ): MatchResult {
   const normSender = normalizeForComparison(transaction.cleanSenderTransliterated);
   const normRawSender = normalizeForComparison(transaction.senderTransliterated);
+  const normGeorgianSender = normalizeForComparison(transaction.senderName);
+  const normCleanGeorgianSender = normalizeForComparison(transaction.cleanSenderName);
+
   const normPayer = normalizeForComparison(transaction.payerTransliterated);
   const normPurpose = normalizeForComparison(transaction.purposeTransliterated);
+  const normRawPurpose = normalizeForComparison(transaction.purpose);
   const payerId = transaction.payerId?.trim();
 
   // 1. Check custom saved rules
   for (const rule of rules) {
     const pattern = normalizeForComparison(rule.sourcePattern);
+    const patternTranslit = normalizeForComparison(transliterateGeorgian(rule.sourcePattern));
     let matched = false;
 
     if (rule.patternType === 'payer_id' && payerId && rule.sourcePattern === payerId) {
       matched = true;
-    } else if (rule.patternType === 'sender' && (normSender.includes(pattern) || normRawSender.includes(pattern))) {
+    } else if (
+      rule.patternType === 'sender' &&
+      (normSender.includes(pattern) ||
+        normRawSender.includes(pattern) ||
+        normSender.includes(patternTranslit) ||
+        normGeorgianSender.includes(pattern))
+    ) {
       matched = true;
     } else if (rule.patternType === 'payer_name' && normPayer.includes(pattern)) {
       matched = true;
-    } else if (rule.patternType === 'purpose' && normPurpose.includes(pattern)) {
+    } else if (rule.patternType === 'purpose' && (normPurpose.includes(pattern) || normRawPurpose.includes(pattern))) {
       matched = true;
     } else if (
       normSender === pattern ||
       normRawSender === pattern ||
+      normSender === patternTranslit ||
+      normGeorgianSender === pattern ||
       normPayer === pattern ||
       normPurpose.includes(pattern)
     ) {
@@ -119,13 +133,29 @@ export function matchTransaction(
   };
 
   for (const member of members) {
+    // Normal forms for Latin and Georgian representations
     const fnNorm = normalizeForComparison(member.firstName);
     const lnNorm = normalizeForComparison(member.lastName);
     const directName = `${fnNorm} ${lnNorm}`.trim();
     const invertedName = `${lnNorm} ${fnNorm}`.trim();
 
-    // 2. Exact match (transliterated or direct)
-    if (normSender === directName || normRawSender === directName) {
+    const directLatin = normalizeForComparison(member.fullNameLatin || member.fullName);
+    const fnLatin = normalizeForComparison(transliterateGeorgian(member.firstName));
+    const lnLatin = normalizeForComparison(transliterateGeorgian(member.lastName));
+    const invertedLatin = `${lnLatin} ${fnLatin}`.trim();
+
+    const directGeorgian = normalizeForComparison(member.fullNameGeorgian || member.fullName);
+    const invertedGeorgian = `${lnNorm} ${fnNorm}`.trim();
+
+    // 2. Exact matches (transliterated, direct or inverted)
+    if (
+      normSender === directName ||
+      normRawSender === directName ||
+      normSender === directLatin ||
+      normRawSender === directLatin ||
+      normGeorgianSender === directGeorgian ||
+      normCleanGeorgianSender === directGeorgian
+    ) {
       return {
         transactionId: transaction.id,
         memberId: member.id,
@@ -136,7 +166,14 @@ export function matchTransaction(
       };
     }
 
-    if (normSender === invertedName || normRawSender === invertedName) {
+    if (
+      normSender === invertedName ||
+      normRawSender === invertedName ||
+      normSender === invertedLatin ||
+      normRawSender === invertedLatin ||
+      normGeorgianSender === invertedGeorgian ||
+      normCleanGeorgianSender === invertedGeorgian
+    ) {
       return {
         transactionId: transaction.id,
         memberId: member.id,
@@ -148,7 +185,13 @@ export function matchTransaction(
     }
 
     // Check payer name exact
-    if (normPayer && (normPayer === directName || normPayer === invertedName)) {
+    if (
+      normPayer &&
+      (normPayer === directName ||
+        normPayer === invertedName ||
+        normPayer === directLatin ||
+        normPayer === invertedLatin)
+    ) {
       return {
         transactionId: transaction.id,
         memberId: member.id,
@@ -163,7 +206,12 @@ export function matchTransaction(
     if (
       (directName && normPurpose.includes(directName)) ||
       (invertedName && normPurpose.includes(invertedName)) ||
-      (fnNorm.length >= 3 && lnNorm.length >= 3 && normPurpose.includes(fnNorm) && normPurpose.includes(lnNorm))
+      (directLatin && normPurpose.includes(directLatin)) ||
+      (invertedLatin && normPurpose.includes(invertedLatin)) ||
+      (directGeorgian && normRawPurpose.includes(directGeorgian)) ||
+      (invertedGeorgian && normRawPurpose.includes(invertedGeorgian)) ||
+      (fnNorm.length >= 3 && lnNorm.length >= 3 && normPurpose.includes(fnNorm) && normPurpose.includes(lnNorm)) ||
+      (fnLatin.length >= 3 && lnLatin.length >= 3 && normPurpose.includes(fnLatin) && normPurpose.includes(lnLatin))
     ) {
       return {
         transactionId: transaction.id,
@@ -177,8 +225,8 @@ export function matchTransaction(
 
     // 4. Token-set check in sender name
     const senderTokens = tokenizeAndSort(normSender);
-    const hasFirstName = fnNorm.length >= 3 && senderTokens.includes(fnNorm);
-    const hasLastName = lnNorm.length >= 3 && senderTokens.includes(lnNorm);
+    const hasFirstName = (fnNorm.length >= 3 && senderTokens.includes(fnNorm)) || (fnLatin.length >= 3 && senderTokens.includes(fnLatin));
+    const hasLastName = (lnNorm.length >= 3 && senderTokens.includes(lnNorm)) || (lnLatin.length >= 3 && senderTokens.includes(lnLatin));
 
     if (hasFirstName && hasLastName) {
       return {
@@ -187,15 +235,15 @@ export function matchTransaction(
         memberName: member.fullName,
         confidence: 0.95,
         matchMethod: 'exact',
-        matchDetails: `Matched tokens [${fnNorm}, ${lnNorm}] in sender`,
+        matchDetails: `Matched tokens in sender: ${transaction.senderName}`,
       };
     }
 
     // 5. Fuzzy string similarity check on sender & payer
-    const simDirect = stringSimilarity(normSender, directName);
-    const simInverted = stringSimilarity(normSender, invertedName);
-    const simPayerDirect = normPayer ? stringSimilarity(normPayer, directName) : 0;
-    const simPayerInverted = normPayer ? stringSimilarity(normPayer, invertedName) : 0;
+    const simDirect = Math.max(stringSimilarity(normSender, directName), stringSimilarity(normSender, directLatin));
+    const simInverted = Math.max(stringSimilarity(normSender, invertedName), stringSimilarity(normSender, invertedLatin));
+    const simPayerDirect = normPayer ? Math.max(stringSimilarity(normPayer, directName), stringSimilarity(normPayer, directLatin)) : 0;
+    const simPayerInverted = normPayer ? Math.max(stringSimilarity(normPayer, invertedName), stringSimilarity(normPayer, invertedLatin)) : 0;
 
     const maxSim = Math.max(simDirect, simInverted, simPayerDirect, simPayerInverted);
 
@@ -215,7 +263,7 @@ export function matchTransaction(
 }
 
 /**
- * Reconciles members and transactions for a specified month/period without relying on a fixed tariff.
+ * Reconciles members and transactions across all uploaded banks (TBC & BOG) for a specified month/period.
  */
 export function reconcileStatements({
   members,
@@ -234,7 +282,10 @@ export function reconcileStatements({
   unrecognizedPayments: UnrecognizedPayment[];
   summary: ReconciliationSummary;
 } {
-  const activeMembers = members.filter((m) => m.status.toLowerCase() === 'active');
+  const activeMembers = members.filter((m) => {
+    const s = (m.status || '').toLowerCase().trim();
+    return !s.includes('inactive') && !s.includes('არაქტიური') && !s.includes('გაუქმებული');
+  });
   const targetMembers = activeMembers.length > 0 ? activeMembers : members;
 
   const periodTransactions =
@@ -286,9 +337,9 @@ export function reconcileStatements({
 
       for (const m of targetMembers) {
         const sim = Math.max(
-          stringSimilarity(tx.cleanSenderTransliterated, m.fullName),
-          stringSimilarity(tx.senderTransliterated, m.fullName),
-          stringSimilarity(cleanPurposeText(tx.purposeTransliterated), m.fullName)
+          stringSimilarity(tx.cleanSenderTransliterated, m.fullNameLatin || m.fullName),
+          stringSimilarity(tx.senderTransliterated, m.fullNameLatin || m.fullName),
+          stringSimilarity(cleanPurposeText(tx.purposeTransliterated), m.fullNameLatin || m.fullName)
         );
         if (sim > highestConf && sim > 0.4) {
           highestConf = sim;
@@ -303,7 +354,7 @@ export function reconcileStatements({
             ? {
                 member: bestGuessMember,
                 confidence: highestConf,
-                reason: `Similar name (${Math.round(highestConf * 100)}%)`,
+                reason: `Suggested (${Math.round(highestConf * 100)}%)`,
               }
             : undefined,
       });
@@ -314,6 +365,8 @@ export function reconcileStatements({
   let unpaidCount = 0;
   let totalCollected = 0;
   let totalMatchedTxs = 0;
+  let tbcCollected = 0;
+  let bogCollected = 0;
 
   const reconciledMembers: MemberReconciliation[] = targetMembers.map((member) => {
     const txData = memberTxMap.get(member.id) || { transactions: [], details: [] };
@@ -329,6 +382,11 @@ export function reconcileStatements({
 
     totalCollected += paidAmount;
     totalMatchedTxs += paymentCount;
+
+    txData.transactions.forEach((t) => {
+      if (t.bank === 'TBC') tbcCollected += t.amount;
+      else if (t.bank === 'BOG') bogCollected += t.amount;
+    });
 
     return {
       member,
@@ -353,6 +411,8 @@ export function reconcileStatements({
     totalTransactionsCount: totalMatchedTxs,
     unrecognizedCount: unrecognizedPayments.length,
     unrecognizedAmount,
+    tbcCollected,
+    bogCollected,
   };
 
   return {

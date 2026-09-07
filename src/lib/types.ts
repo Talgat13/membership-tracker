@@ -4,8 +4,12 @@ export interface ClubMember {
   lastName: string;
   fullName: string;
   status: 'Active' | 'Inactive' | string;
+  fullNameLatin?: string;
+  fullNameGeorgian?: string;
   raw?: Record<string, any>;
 }
+
+export type BankSource = 'TBC' | 'BOG' | 'Other';
 
 export interface BankTransaction {
   id: string;
@@ -25,6 +29,7 @@ export interface BankTransaction {
   purposeTransliterated: string;
   docNumber?: string;
   account?: string;
+  bank?: BankSource;
   raw?: Record<string, any>;
 }
 
@@ -88,4 +93,6 @@ export interface ReconciliationSummary {
   totalTransactionsCount: number;
   unrecognizedCount: number;
   unrecognizedAmount: number;
+  tbcCollected?: number;
+  bogCollected?: number;
 }

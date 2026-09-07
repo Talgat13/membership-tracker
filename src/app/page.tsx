@@ -10,6 +10,9 @@ import { TransactionModal } from '@/components/TransactionModal';
 import { RulesManagerModal } from '@/components/RulesManagerModal';
 import {
   UploadCloud,
+  Users,
+  Building2,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 import {
@@ -23,19 +26,25 @@ import { exportReconciliationToExcel } from '@/lib/export';
 import {
   loadSavedRules,
   addMappingRule,
-  loadCachedData,
-  saveCachedData,
+  loadMultiBankCachedData,
+  saveMultiBankCachedData,
   clearMembersCache,
-  clearTransactionsCache,
+  clearTbcCache,
+  clearBogCache,
   clearCachedSession,
 } from '@/lib/storage';
 
 export default function Home() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  // 3 distinct datasets
   const [members, setMembers] = useState<ClubMember[]>([]);
-  const [transactions, setTransactions] = useState<BankTransaction[]>([]);
+  const [tbcTransactions, setTbcTransactions] = useState<BankTransaction[]>([]);
+  const [bogTransactions, setBogTransactions] = useState<BankTransaction[]>([]);
+
   const [membersFileName, setMembersFileName] = useState<string>('');
-  const [transactionsFileName, setTransactionsFileName] = useState<string>('');
+  const [tbcFileName, setTbcFileName] = useState<string>('');
+  const [bogFileName, setBogFileName] = useState<string>('');
 
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -67,18 +76,18 @@ export default function Home() {
     setRules(savedRules);
 
     // 3. Restore persisted files and overrides from localStorage
-    const cached = loadCachedData();
+    const cached = loadMultiBankCachedData();
     if (cached.members && cached.members.length > 0) {
       setMembers(cached.members);
-      if (cached.membersFileName) {
-        setMembersFileName(cached.membersFileName);
-      }
+      if (cached.membersFileName) setMembersFileName(cached.membersFileName);
     }
-    if (cached.transactions && cached.transactions.length > 0) {
-      setTransactions(cached.transactions);
-      if (cached.transactionsFileName) {
-        setTransactionsFileName(cached.transactionsFileName);
-      }
+    if (cached.tbcTransactions && cached.tbcTransactions.length > 0) {
+      setTbcTransactions(cached.tbcTransactions);
+      if (cached.tbcFileName) setTbcFileName(cached.tbcFileName);
+    }
+    if (cached.bogTransactions && cached.bogTransactions.length > 0) {
+      setBogTransactions(cached.bogTransactions);
+      if (cached.bogFileName) setBogFileName(cached.bogFileName);
     }
     if (cached.overrides && Object.keys(cached.overrides).length > 0) {
       setManualOverrides(cached.overrides);
@@ -96,18 +105,23 @@ export default function Home() {
     }
   };
 
-  // Extract all distinct months present in transactions
+  // Combine transactions from all banks
+  const allTransactions = useMemo(() => {
+    return [...tbcTransactions, ...bogTransactions];
+  }, [tbcTransactions, bogTransactions]);
+
+  // Extract all distinct months present in all bank transactions
   const availableMonths = useMemo(() => {
     const monthsSet = new Set<string>();
-    transactions.forEach((tx) => {
+    allTransactions.forEach((tx) => {
       if (tx.month) monthsSet.add(tx.month);
     });
     return Array.from(monthsSet).sort().reverse();
-  }, [transactions]);
+  }, [allTransactions]);
 
-  // Run reconciliation engine
+  // Run reconciliation engine across all banks
   const { reconciledMembers, unrecognizedPayments, summary } = useMemo(() => {
-    if (members.length === 0 && transactions.length === 0) {
+    if (members.length === 0 && allTransactions.length === 0) {
       return {
         reconciledMembers: [],
         unrecognizedPayments: [],
@@ -119,18 +133,20 @@ export default function Home() {
           unrecognizedAmount: 0,
           totalCollected: 0,
           totalTransactionsCount: 0,
+          tbcCollected: 0,
+          bogCollected: 0,
         },
       };
     }
 
     return reconcileStatements({
       members,
-      transactions,
+      transactions: allTransactions,
       selectedMonth,
       rules,
       manualOverrides,
     });
-  }, [members, transactions, selectedMonth, rules, manualOverrides]);
+  }, [members, allTransactions, selectedMonth, rules, manualOverrides]);
 
   // Filter reconciled members by search query and status filter
   const filteredReconciledMembers = useMemo(() => {
@@ -139,6 +155,7 @@ export default function Home() {
       const matchesSearch =
         !q ||
         r.member.fullName.toLowerCase().includes(q) ||
+        (r.member.fullNameLatin && r.member.fullNameLatin.toLowerCase().includes(q)) ||
         r.member.firstName.toLowerCase().includes(q) ||
         r.member.lastName.toLowerCase().includes(q) ||
         r.transactions.some(
@@ -155,17 +172,47 @@ export default function Home() {
     });
   }, [reconciledMembers, searchQuery, statusFilter]);
 
-  // File loading and clearing with automatic localStorage sync
+  // Handlers for loading 3 files with localStorage persistence
   const handleMembersLoaded = (newMembers: ClubMember[], filename: string) => {
     setMembers(newMembers);
     setMembersFileName(filename);
-    saveCachedData(newMembers, transactions, filename, transactionsFileName, manualOverrides);
+    saveMultiBankCachedData({
+      members: newMembers,
+      membersFileName: filename,
+      tbcTransactions,
+      tbcFileName,
+      bogTransactions,
+      bogFileName,
+      overrides: manualOverrides,
+    });
   };
 
-  const handleTransactionsLoaded = (newTxs: BankTransaction[], filename: string) => {
-    setTransactions(newTxs);
-    setTransactionsFileName(filename);
-    saveCachedData(members, newTxs, membersFileName, filename, manualOverrides);
+  const handleTbcLoaded = (newTxs: BankTransaction[], filename: string) => {
+    setTbcTransactions(newTxs);
+    setTbcFileName(filename);
+    saveMultiBankCachedData({
+      members,
+      membersFileName,
+      tbcTransactions: newTxs,
+      tbcFileName: filename,
+      bogTransactions,
+      bogFileName,
+      overrides: manualOverrides,
+    });
+  };
+
+  const handleBogLoaded = (newTxs: BankTransaction[], filename: string) => {
+    setBogTransactions(newTxs);
+    setBogFileName(filename);
+    saveMultiBankCachedData({
+      members,
+      membersFileName,
+      tbcTransactions,
+      tbcFileName,
+      bogTransactions: newTxs,
+      bogFileName: filename,
+      overrides: manualOverrides,
+    });
   };
 
   const handleClearMembers = () => {
@@ -174,17 +221,25 @@ export default function Home() {
     clearMembersCache();
   };
 
-  const handleClearTransactions = () => {
-    setTransactions([]);
-    setTransactionsFileName('');
-    clearTransactionsCache();
+  const handleClearTbc = () => {
+    setTbcTransactions([]);
+    setTbcFileName('');
+    clearTbcCache();
+  };
+
+  const handleClearBog = () => {
+    setBogTransactions([]);
+    setBogFileName('');
+    clearBogCache();
   };
 
   const handleReset = () => {
     setMembers([]);
-    setTransactions([]);
+    setTbcTransactions([]);
+    setBogTransactions([]);
     setMembersFileName('');
-    setTransactionsFileName('');
+    setTbcFileName('');
+    setBogFileName('');
     setManualOverrides({});
     clearCachedSession();
   };
@@ -196,7 +251,15 @@ export default function Home() {
   ) => {
     const newOverrides = { ...manualOverrides, [tx.id]: member.id };
     setManualOverrides(newOverrides);
-    saveCachedData(members, transactions, membersFileName, transactionsFileName, newOverrides);
+    saveMultiBankCachedData({
+      members,
+      membersFileName,
+      tbcTransactions,
+      tbcFileName,
+      bogTransactions,
+      bogFileName,
+      overrides: newOverrides,
+    });
 
     if (saveRule) {
       const pattern = tx.cleanSenderName || tx.senderName;
@@ -219,7 +282,15 @@ export default function Home() {
     const newOverrides = { ...manualOverrides };
     delete newOverrides[transactionId];
     setManualOverrides(newOverrides);
-    saveCachedData(members, transactions, membersFileName, transactionsFileName, newOverrides);
+    saveMultiBankCachedData({
+      members,
+      membersFileName,
+      tbcTransactions,
+      tbcFileName,
+      bogTransactions,
+      bogFileName,
+      overrides: newOverrides,
+    });
 
     if (selectedMemberForModal) {
       const updated = reconciledMembers.find(
@@ -238,7 +309,7 @@ export default function Home() {
     });
   };
 
-  const hasData = members.length > 0 || transactions.length > 0;
+  const hasData = members.length > 0 || tbcTransactions.length > 0 || bogTransactions.length > 0;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
@@ -254,16 +325,20 @@ export default function Home() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Upload Dropzones */}
+        {/* 3 Upload Dropzones */}
         <FileUploadZone
           members={members}
-          transactions={transactions}
+          tbcTransactions={tbcTransactions}
+          bogTransactions={bogTransactions}
           onMembersLoaded={handleMembersLoaded}
-          onTransactionsLoaded={handleTransactionsLoaded}
+          onTbcLoaded={handleTbcLoaded}
+          onBogLoaded={handleBogLoaded}
           onClearMembers={handleClearMembers}
-          onClearTransactions={handleClearTransactions}
+          onClearTbc={handleClearTbc}
+          onClearBog={handleClearBog}
           membersFileName={membersFileName}
-          transactionsFileName={transactionsFileName}
+          tbcFileName={tbcFileName}
+          bogFileName={bogFileName}
         />
 
         {/* If no files loaded yet: display clean Getting Started instructions */}
@@ -277,7 +352,7 @@ export default function Home() {
                 Upload Your Files to Begin
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                To start reconciliation, upload the Active Members list and the Georgian Bank Statement above.
+                To start reconciliation across both banks, upload the Active Members list, TBC Bank statement, and BOG statement above.
               </p>
             </div>
 
@@ -293,35 +368,35 @@ export default function Home() {
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Upload `.xlsx`, `.xls` or `.csv` with member names (Latin / English).
+                  Upload `.xlsx`, `.xls` or `.csv` with active members (Georgian or Latin names).
                 </p>
               </div>
 
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-2">
                 <div className="flex items-center space-x-2">
-                  <div className="w-6 h-6 rounded-full bg-teal-600 text-white flex items-center justify-center text-xs font-bold">
+                  <div className="w-6 h-6 rounded-full bg-sky-600 text-white flex items-center justify-center text-xs font-bold">
                     2
                   </div>
                   <span className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase">
-                    Bank Statement
+                    TBC Bank Statement
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Upload TBC or BOG statement with Georgian sender names and amounts (₾).
+                  Upload TBC statement with member transfers and amounts (₾).
                 </p>
               </div>
 
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-2">
                 <div className="flex items-center space-x-2">
-                  <div className="w-6 h-6 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs font-bold">
+                  <div className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-xs font-bold">
                     3
                   </div>
                   <span className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase">
-                    Auto-Match
+                    BOG Bank Statement
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Instant Georgian transliteration, fuzzy matching, and exportable report.
+                  Upload Bank of Georgia statement with payments and credits (₾).
                 </p>
               </div>
             </div>
@@ -375,7 +450,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t border-slate-200 dark:border-slate-900 py-6 text-center text-xs text-slate-500">
         <p>
-          FitPass & Membership Reconciliation Engine • Automated Georgian Alphabet Transliteration (Mkhedruli → Latin)
+          FitPass & Membership Reconciliation Engine • Automated Georgian Alphabet Transliteration (Mkhedruli → Latin) • TBC & BOG Bank Support
         </p>
       </footer>
 

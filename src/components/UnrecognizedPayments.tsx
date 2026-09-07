@@ -36,7 +36,8 @@ export function UnrecognizedPayments({
   const [memberSearch, setMemberSearch] = useState<string>('');
 
   const filteredMembers = members.filter((m) =>
-    m.fullName.toLowerCase().includes(memberSearch.toLowerCase())
+    m.fullName.toLowerCase().includes(memberSearch.toLowerCase()) ||
+    (m.fullNameLatin && m.fullNameLatin.toLowerCase().includes(memberSearch.toLowerCase()))
   );
 
   const handleOpenBindModal = (payment: UnrecognizedPayment) => {
@@ -68,7 +69,7 @@ export function UnrecognizedPayments({
               Unmatched Transactions ({unrecognized.length})
             </h3>
             <p className="text-xs text-amber-800/80 dark:text-amber-200/70">
-              Payments that could not be matched automatically. You can manually link them to a member and save a persistent rule.
+              Payments from TBC / BOG that could not be matched automatically. You can manually link them to a member and save a persistent rule.
             </p>
           </div>
         </div>
@@ -80,7 +81,7 @@ export function UnrecognizedPayments({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                <th className="py-3.5 px-4">Date</th>
+                <th className="py-3.5 px-4">Bank & Date</th>
                 <th className="py-3.5 px-4 text-right">Amount (₾)</th>
                 <th className="py-3.5 px-4">Sender / Payer (Georgian / Latin)</th>
                 <th className="py-3.5 px-4">Payment Purpose</th>
@@ -94,7 +95,7 @@ export function UnrecognizedPayments({
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400 dark:text-slate-500">
                     <Check className="w-8 h-8 mx-auto mb-2 text-emerald-500" />
-                    All payments have been matched successfully! No unmatched transactions.
+                    All payments from all banks have been matched successfully!
                   </td>
                 </tr>
               ) : (
@@ -106,11 +107,19 @@ export function UnrecognizedPayments({
                       key={tx.id}
                       className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
                     >
-                      {/* Date */}
+                      {/* Bank & Date */}
                       <td className="py-3.5 px-4 whitespace-nowrap text-slate-700 dark:text-slate-300 font-mono text-xs">
-                        <div className="flex items-center space-x-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
-                          <span>{tx.date}</span>
+                        <div className="flex items-center space-x-2">
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                              tx.bank === 'TBC'
+                                ? 'bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-400'
+                                : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-400'
+                            }`}
+                          >
+                            {tx.bank || 'Bank'}
+                          </span>
+                          <span className="text-slate-500 dark:text-slate-400">{tx.date}</span>
                         </div>
                       </td>
 
@@ -161,7 +170,7 @@ export function UnrecognizedPayments({
                               setSaveAsRule(true);
                             }}
                             className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/20 text-xs transition-colors text-left cursor-pointer"
-                            title="Click to link with recommended member"
+                            title="Click to link with suggested member"
                           >
                             <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
                             <span className="truncate">
@@ -218,9 +227,20 @@ export function UnrecognizedPayments({
               {/* Payment Details Card */}
               <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
                 <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
-                  <span>Amount & Date:</span>
+                  <div className="flex items-center space-x-1.5">
+                    <span
+                      className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                        selectedTx.bank === 'TBC'
+                          ? 'bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-400'
+                          : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-400'
+                      }`}
+                    >
+                      {selectedTx.bank || 'Bank'}
+                    </span>
+                    <span>{selectedTx.date}</span>
+                  </div>
                   <span className="text-emerald-700 dark:text-emerald-400 font-bold text-sm">
-                    {selectedTx.amount.toLocaleString()} ₾ • {selectedTx.date}
+                    {selectedTx.amount.toLocaleString()} ₾
                   </span>
                 </div>
                 <div className="flex justify-between items-start text-slate-800 dark:text-slate-300">
@@ -251,7 +271,7 @@ export function UnrecognizedPayments({
                   <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" />
                   <input
                     type="text"
-                    placeholder="Search members..."
+                    placeholder="Search members by name..."
                     value={memberSearch}
                     onChange={(e) => setMemberSearch(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -270,7 +290,12 @@ export function UnrecognizedPayments({
                           : 'text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800'
                       }`}
                     >
-                      <span>{m.fullName}</span>
+                      <div>
+                        <span>{m.fullName}</span>
+                        {m.fullNameLatin && m.fullNameLatin !== m.fullName && (
+                          <span className="text-[11px] opacity-75 ml-1.5">({m.fullNameLatin})</span>
+                        )}
+                      </div>
                       <span className="text-[11px] opacity-80">{m.status}</span>
                     </button>
                   ))}
@@ -291,7 +316,7 @@ export function UnrecognizedPayments({
                       Save persistent rule in localStorage
                     </span>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Automatically link «{selectedTx.cleanSenderName || selectedTx.senderName}» to the selected member in future bank statements.
+                      Automatically link «{selectedTx.cleanSenderName || selectedTx.senderName}» to the selected member in future statements.
                     </span>
                   </div>
                 </label>

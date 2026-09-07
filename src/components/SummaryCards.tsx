@@ -136,7 +136,7 @@ export function SummaryCards({
         </div>
       </button>
 
-      {/* 5. Total Collected (₾) */}
+      {/* 5. Total Collected (₾) with TBC / BOG breakdown */}
       <div className="col-span-2 sm:col-span-1 lg:col-span-1 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-emerald-50 via-teal-50 to-white dark:from-slate-900/90 dark:via-slate-900/70 dark:to-emerald-950/30 flex flex-col justify-between shadow-xs">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-emerald-800 dark:text-slate-300">
@@ -148,13 +148,25 @@ export function SummaryCards({
         </div>
 
         <div className="mt-2 flex items-baseline space-x-1.5">
-          <span className="text-2xl sm:text-3xl font-extrabold text-emerald-700 dark:text-white tracking-tight">
+          <span className="text-2xl font-extrabold text-emerald-700 dark:text-white tracking-tight">
             {summary.totalCollected.toLocaleString()} ₾
           </span>
         </div>
 
-        <div className="mt-1 text-[11px] text-emerald-800/80 dark:text-slate-400 truncate">
-          {summary.totalTransactionsCount} payment(s) matched
+        <div className="mt-1 text-[10px] text-slate-500 dark:text-slate-400 flex items-center justify-between gap-1">
+          {summary.tbcCollected !== undefined && summary.tbcCollected > 0 && (
+            <span className="text-sky-600 dark:text-sky-400 font-medium">
+              TBC: {summary.tbcCollected.toLocaleString()} ₾
+            </span>
+          )}
+          {summary.bogCollected !== undefined && summary.bogCollected > 0 && (
+            <span className="text-amber-600 dark:text-amber-400 font-medium">
+              BOG: {summary.bogCollected.toLocaleString()} ₾
+            </span>
+          )}
+          {(!summary.tbcCollected && !summary.bogCollected) && (
+            <span>{summary.totalTransactionsCount} payment(s) matched</span>
+          )}
         </div>
       </div>
     </div>

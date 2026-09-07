@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
-import { ClubMember, BankTransaction } from './types';
+import { ClubMember, BankTransaction, BankSource } from './types';
 import {
   transliterateGeorgian,
   stripBusinessPrefixes,
@@ -18,7 +18,13 @@ export function parseExcelDate(val: any): { dateStr: string; monthStr: string } 
   }
 
   // If number (Excel date code)
-  if (typeof val === 'number' || (!isNaN(Number(val)) && !String(val).includes('-') && !String(val).includes('.') && !String(val).includes('/'))) {
+  if (
+    typeof val === 'number' ||
+    (!isNaN(Number(val)) &&
+      !String(val).includes('-') &&
+      !String(val).includes('.') &&
+      !String(val).includes('/'))
+  ) {
     const num = Number(val);
     if (num > 30000 && num < 70000) {
       // Excel serial date code
@@ -94,13 +100,32 @@ export function parseAmount(val: any): number {
 }
 
 /**
- * Reads binary ArrayBuffer / Uint8Array into 2D array of rows.
+ * Reads binary ArrayBuffer / Uint8Array into 2D array of rows from all sheets.
+ */
+export function readWorkbookToAllSheetsRows(data: ArrayBuffer | Uint8Array): { sheetName: string; rows: any[][] }[] {
+  const wb = XLSX.read(data, { type: 'array', cellDates: false });
+  const result: { sheetName: string; rows: any[][] }[] = [];
+  for (const sn of wb.SheetNames) {
+    const sheet = wb.Sheets[sn];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
+    result.push({ sheetName: sn, rows });
+  }
+  return result;
+}
+
+/**
+ * Reads first sheet rows for backward compatibility.
  */
 export function readWorkbookToRows(data: ArrayBuffer | Uint8Array): any[][] {
-  const wb = XLSX.read(data, { type: 'array', cellDates: false });
-  const firstSheetName = wb.SheetNames[0];
-  const sheet = wb.Sheets[firstSheetName];
-  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
+  const allSheets = readWorkbookToAllSheetsRows(data);
+  if (allSheets.length === 0) return [];
+  // If multiple sheets exist, concatenate non-empty rows
+  let combined: any[][] = [];
+  for (const s of allSheets) {
+    const valid = s.rows.filter((r) => r.some((c) => c !== ''));
+    combined = combined.concat(valid);
+  }
+  return combined.length > 0 ? combined : allSheets[0].rows;
 }
 
 /**
@@ -118,6 +143,7 @@ export function parseCsvToRows(csvText: string): Promise<any[][]> {
 
 /**
  * Parses Active Members data from raw 2D array.
+ * Supports both Georgian and English / Latin names.
  */
 export function parseMembersFromRows(rows: any[][]): ClubMember[] {
   if (!rows || rows.length === 0) return [];
@@ -128,17 +154,38 @@ export function parseMembersFromRows(rows: any[][]): ClubMember[] {
   let lnIdx = -1;
   let fullIdx = -1;
   let statusIdx = -1;
-  let feeIdx = -1;
 
-  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+  for (let i = 0; i < Math.min(rows.length, 25); i++) {
     const row = rows[i] || [];
     for (let c = 0; c < row.length; c++) {
       const colName = String(row[c] || '').trim().toLowerCase();
-      if (colName === 'first name' || colName === 'firstname' || colName === 'სახელი') fnIdx = c;
-      if (colName === 'last name' || colName === 'lastname' || colName === 'გვარი') lnIdx = c;
-      if (colName === 'full name' || colName === 'fullname' || colName === 'name' || colName === 'სახელი და გვარი') fullIdx = c;
-      if (colName === 'status' || colName === 'სტატუსი') statusIdx = c;
-      if (colName.includes('fee') || colName.includes('თანხა') || colName.includes('amount') || colName.includes('ფასი')) feeIdx = c;
+      if (
+        colName === 'first name' ||
+        colName === 'firstname' ||
+        colName === 'სახელი' ||
+        colName.startsWith('სახელ')
+      )
+        fnIdx = c;
+      if (
+        colName === 'last name' ||
+        colName === 'lastname' ||
+        colName === 'გვარი' ||
+        colName.startsWith('გვარ')
+      )
+        lnIdx = c;
+      if (
+        colName === 'full name' ||
+        colName === 'fullname' ||
+        colName === 'name' ||
+        colName === 'სახელი და გვარი'
+      )
+        fullIdx = c;
+      if (
+        colName === 'status' ||
+        colName === 'სტატუსი' ||
+        colName.includes('active')
+      )
+        statusIdx = c;
     }
 
     if (fnIdx !== -1 || fullIdx !== -1) {
@@ -147,7 +194,7 @@ export function parseMembersFromRows(rows: any[][]): ClubMember[] {
     }
   }
 
-  // If no clear header found, assume standard 0: First Name, 1: Last Name, 2: Status
+  // If no clear header found, default to col 0: First Name, col 1: Last Name, col 2: Status
   const startIndex = headerRowIndex >= 0 ? headerRowIndex + 1 : 0;
   if (fnIdx === -1 && fullIdx === -1) {
     fnIdx = 0;
@@ -164,7 +211,6 @@ export function parseMembersFromRows(rows: any[][]): ClubMember[] {
     let firstName = '';
     let lastName = '';
     let status = 'Active';
-    let fee: number | undefined = undefined;
 
     if (fnIdx !== -1) {
       firstName = String(row[fnIdx] || '').trim();
@@ -188,16 +234,27 @@ export function parseMembersFromRows(rows: any[][]): ClubMember[] {
       if (s) status = s;
     }
 
-    if (feeIdx !== -1 && row[feeIdx] !== undefined) {
-      const parsedFee = parseAmount(row[feeIdx]);
-      if (parsedFee > 0) fee = parsedFee;
-    }
-
     // Skip empty rows or header duplicates
     if (!firstName && !lastName) continue;
-    if (firstName.toLowerCase() === 'first name' || lastName.toLowerCase() === 'last name') continue;
+    const lowerFn = firstName.toLowerCase();
+    const lowerLn = lastName.toLowerCase();
+    if (
+      lowerFn === 'first name' ||
+      lowerLn === 'last name' ||
+      lowerFn.startsWith('სახელ') ||
+      lowerLn.startsWith('გვარ')
+    )
+      continue;
 
     const fullName = `${firstName} ${lastName}`.trim();
+    const hasGeorgian = /[\u10A0-\u10FF]/.test(fullName);
+
+    const fullNameLatin = hasGeorgian
+      ? transliterateGeorgian(fullName)
+      : fullName;
+    const fullNameGeorgian = hasGeorgian
+      ? fullName
+      : undefined;
 
     members.push({
       id: `member-${members.length + 1}-${normalizeForComparison(fullName).replace(/\s+/g, '-')}`,
@@ -205,6 +262,8 @@ export function parseMembersFromRows(rows: any[][]): ClubMember[] {
       lastName,
       fullName,
       status,
+      fullNameLatin,
+      fullNameGeorgian,
       raw: row,
     });
   }
@@ -213,9 +272,13 @@ export function parseMembersFromRows(rows: any[][]): ClubMember[] {
 }
 
 /**
- * Parses Bank Statement from raw 2D array (e.g. TBC, BOG, Liberty Bank reports).
+ * Parses Bank Statement from Excel Workbook (all sheets) or raw rows.
+ * Dedicated recognition for TBC Bank and Bank of Georgia (BOG).
  */
-export function parseBankReportFromRows(rows: any[][]): BankTransaction[] {
+export function parseBankReportFromRows(
+  rows: any[][],
+  defaultBank?: BankSource
+): BankTransaction[] {
   if (!rows || rows.length === 0) return [];
 
   // Look for header row
@@ -227,6 +290,7 @@ export function parseBankReportFromRows(rows: any[][]): BankTransaction[] {
   let payerIdx = -1;
   let payerIdIdx = -1;
   let purposeIdx = -1;
+  let addInfoIdx = -1;
   let docIdx = -1;
   let accountIdx = -1;
 
@@ -237,11 +301,11 @@ export function parseBankReportFromRows(rows: any[][]): BankTransaction[] {
     for (let c = 0; c < row.length; c++) {
       const val = String(row[c] || '').trim().toLowerCase();
 
-      if (val === 'თარიღი' || val === 'date' || val === 'operation date') {
+      if (val === 'თარიღი' || val.includes('date') || val === 'operation date') {
         dateIdx = c;
         matchCount++;
       }
-      if (val === 'თანხა' || val === 'amount') {
+      if (val === 'თანხა' || val.includes('paid in') || val === 'შემოსული თანხა') {
         amountIdx = c;
         matchCount++;
       }
@@ -249,77 +313,183 @@ export function parseBankReportFromRows(rows: any[][]): BankTransaction[] {
         creditIdx = c;
         matchCount++;
       }
-      if (val === 'გამგზავნის დასახელება' || val === 'გამგზავნი' || val === 'sender' || val === 'sender name') {
+      if (
+        val === 'გამგზავნის დასახელება' ||
+        val === 'გამგზავნი' ||
+        val === 'sender' ||
+        val === 'sender name'
+      ) {
         senderIdx = c;
         matchCount++;
       }
-      if (val === 'გადამხდელის დასახელება' || val === 'გადამხდელი' || val === 'payer' || val === 'payer name') {
+      if (
+        val === 'გადამხდელის დასახელება' ||
+        val === 'გადამხდელი' ||
+        val === 'payer' ||
+        val === 'payer name'
+      ) {
         payerIdx = c;
         matchCount++;
       }
-      if (val.includes('საინდენტიფიკაციო კოდი') || val.includes('payer id') || val.includes('პირადი ნომერი')) {
+      if (
+        val.includes('საიდენტიფიკაციო კოდი') ||
+        val.includes('საინდენტიფიკაციო') ||
+        val.includes('payer id') ||
+        val.includes('პირადი ნომერი')
+      ) {
         payerIdIdx = c;
         matchCount++;
       }
-      if (val === 'დანიშნულება' || val === 'ოპერაციის შინაარსი' || val === 'purpose' || val === 'description' || val === 'details') {
-        if (purposeIdx === -1 || val === 'დანიშნულება') {
+      if (
+        val === 'დანიშნულება' ||
+        val.includes('description') ||
+        val.includes('purpose') ||
+        val === 'ოპერაციის შინაარსი'
+      ) {
+        if (purposeIdx === -1) {
           purposeIdx = c;
+          matchCount++;
         }
+      }
+      if (
+        val.includes('დამატებითი ინფორმაცია') ||
+        val.includes('additional information')
+      ) {
+        addInfoIdx = c;
         matchCount++;
       }
-      if (val === 'საბუთის n' || val === 'doc number' || val === 'ოპერაციის იდ') {
+      if (val.includes('საბუთის') || val.includes('doc') || val.includes('document')) {
         docIdx = c;
       }
-      if (val.includes('ანგარიში') || val.includes('account')) {
+      if (val.includes('ანგარიში') || val.includes('account') || val.includes('iban')) {
         accountIdx = c;
       }
     }
 
-    if (matchCount >= 3) {
+    if (matchCount >= 2) {
       headerRowIndex = i;
       break;
     }
   }
 
-  const effectiveHeaderRow = headerRowIndex >= 0 ? headerRowIndex : 0;
   const transactions: BankTransaction[] = [];
+  const startIndex = headerRowIndex >= 0 ? headerRowIndex + 1 : 0;
 
-  for (let i = effectiveHeaderRow + 1; i < rows.length; i++) {
+  for (let i = startIndex; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length === 0) continue;
 
-    // Determine amount: Prefer Credit column if available, else Amount column
+    const rawDate = dateIdx !== -1 ? row[dateIdx] : row[0];
+    if (rawDate === undefined || rawDate === null || rawDate === '') continue;
+
+    // Skip repeat headers
+    const rawDateStr = String(rawDate).trim().toLowerCase();
+    if (rawDateStr.includes('date') || rawDateStr.includes('თარიღი')) continue;
+
+    const { dateStr, monthStr } = parseExcelDate(rawDate);
+
+    // Extract amount
     let amount = 0;
-    if (creditIdx !== -1 && row[creditIdx] !== undefined && row[creditIdx] !== '') {
+    if (creditIdx !== -1 && row[creditIdx] !== undefined) {
       amount = parseAmount(row[creditIdx]);
-    } else if (amountIdx !== -1 && row[amountIdx] !== undefined) {
+    }
+    if (amount === 0 && amountIdx !== -1 && row[amountIdx] !== undefined) {
       amount = parseAmount(row[amountIdx]);
     }
 
-    // Skip empty or 0 / negative transactions (we only reconcile incoming revenue)
+    // Special auto-fallbacks for TBC tables
+    if (amount === 0) {
+      if (row[8] && parseAmount(row[8]) > 0) {
+        amount = parseAmount(row[8]);
+      } else if (row[4] && parseAmount(row[4]) > 0) {
+        amount = parseAmount(row[4]);
+      } else if (row[3] && parseAmount(row[3]) > 0) {
+        amount = parseAmount(row[3]);
+      }
+    }
+
+    // Skip outgoing transactions or 0 amounts
     if (amount <= 0) continue;
 
-    const rawDateVal = dateIdx !== -1 ? row[dateIdx] : undefined;
-    const { dateStr, monthStr } = parseExcelDate(rawDateVal);
+    // Extract sender name
+    let senderName = '';
+    if (senderIdx !== -1 && row[senderIdx]) {
+      senderName = String(row[senderIdx]).trim();
+    }
+    if (!senderName && addInfoIdx !== -1 && row[addInfoIdx]) {
+      const fullAddInfo = String(row[addInfoIdx]).trim();
+      senderName = fullAddInfo.split(',')[0].trim();
+    }
+    if (!senderName && row[6]) {
+      const col6 = String(row[6]).trim();
+      if (col6.includes(',') || /[\u10A0-\u10FF]/.test(col6)) {
+        senderName = col6.split(',')[0].trim();
+      }
+    }
+    if (!senderName && row[2]) {
+      const col2 = String(row[2]).trim();
+      if (col2.includes(',') || /[\u10A0-\u10FF]/.test(col2)) {
+        senderName = col2.split(',')[0].trim();
+      }
+    }
+    if (!senderName && row[9]) {
+      senderName = String(row[9]).trim();
+    }
 
-    const senderName = senderIdx !== -1 ? String(row[senderIdx] || '').trim() : '';
-    const payerName = payerIdx !== -1 ? String(row[payerIdx] || '').trim() : '';
-    const payerId = payerIdIdx !== -1 ? String(row[payerIdIdx] || '').trim() : undefined;
-    const purpose = purposeIdx !== -1 ? String(row[purposeIdx] || '').trim() : '';
-    const docNumber = docIdx !== -1 ? String(row[docIdx] || '').trim() : undefined;
-    const account = accountIdx !== -1 ? String(row[accountIdx] || '').trim() : undefined;
+    // Extract payer / company
+    let payerName = '';
+    if (payerIdx !== -1 && row[payerIdx]) {
+      payerName = String(row[payerIdx]).trim();
+    }
 
-    // Transliterate names and purposes
-    const senderTransliterated = transliterateGeorgian(senderName);
+    // Extract payer ID
+    let payerId = '';
+    if (payerIdIdx !== -1 && row[payerIdIdx]) {
+      payerId = String(row[payerIdIdx]).trim();
+    } else if (row[10] && /^\d{9,11}$/.test(String(row[10]).trim())) {
+      payerId = String(row[10]).trim();
+    }
+
+    // Extract purpose
+    let purpose = '';
+    if (purposeIdx !== -1 && row[purposeIdx]) {
+      purpose = String(row[purposeIdx]).trim();
+    }
+    if (!purpose && row[1]) {
+      purpose = String(row[1]).trim();
+    }
+    if (!purpose && row[5]) {
+      purpose = String(row[5]).trim();
+    }
+
+    // Extract document number
+    let docNumber = '';
+    if (docIdx !== -1 && row[docIdx]) {
+      docNumber = String(row[docIdx]).trim();
+    }
+
+    // Clean names
     const cleanSenderName = stripBusinessPrefixes(senderName);
+    const senderTransliterated = transliterateGeorgian(senderName);
     const cleanSenderTransliterated = transliterateGeorgian(cleanSenderName);
     const payerTransliterated = transliterateGeorgian(payerName);
     const purposeTransliterated = transliterateGeorgian(purpose);
 
+    // Determine bank
+    let bank: BankSource = defaultBank || 'Other';
+    if (!defaultBank) {
+      const fullRowText = JSON.stringify(row).toLowerCase();
+      if (fullAddInfoHas(fullRowText, 'tbc') || fullRowText.includes('tbcbge')) {
+        bank = 'TBC';
+      } else if (fullRowText.includes('bagage') || fullRowText.includes('საქართველოს ბანკი')) {
+        bank = 'BOG';
+      }
+    }
+
     transactions.push({
-      id: `tx-${i}-${docNumber || Math.random().toString(36).substring(2, 8)}`,
+      id: `tx-${transactions.length + 1}-${dateStr}-${amount}-${Math.random().toString(36).substring(2, 6)}`,
       date: dateStr,
-      rawDate: rawDateVal,
+      rawDate,
       month: monthStr,
       amount,
       currency: 'GEL',
@@ -333,10 +503,32 @@ export function parseBankReportFromRows(rows: any[][]): BankTransaction[] {
       purpose,
       purposeTransliterated,
       docNumber,
-      account,
+      bank,
       raw: row,
     });
   }
 
   return transactions;
+}
+
+function fullAddInfoHas(text: string, sub: string): boolean {
+  return text.toLowerCase().includes(sub.toLowerCase());
+}
+
+/**
+ * Universal parser that parses all sheets in an Excel buffer.
+ */
+export function parseBankWorkbook(
+  data: ArrayBuffer | Uint8Array,
+  bank: BankSource
+): BankTransaction[] {
+  const allSheets = readWorkbookToAllSheetsRows(data);
+  let allTxs: BankTransaction[] = [];
+
+  for (const s of allSheets) {
+    const sheetTxs = parseBankReportFromRows(s.rows, bank);
+    allTxs = allTxs.concat(sheetTxs);
+  }
+
+  return allTxs;
 }

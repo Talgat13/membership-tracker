@@ -2,7 +2,6 @@
 import React from 'react';
 import {
   X,
-  CreditCard,
   Calendar,
   Sparkles,
   CheckCircle2,
@@ -44,7 +43,7 @@ export function TransactionModal({
       case 'inverted':
         return (
           <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-teal-100 dark:bg-teal-500/20 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-500/30">
-            Last Name First
+            Inverted Name
           </span>
         );
       case 'purpose':
@@ -81,13 +80,20 @@ export function TransactionModal({
         <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/90">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-400 flex items-center justify-center font-bold text-lg">
-              {member.firstName.charAt(0)}
-              {member.lastName.charAt(0)}
+              {member.firstName ? member.firstName.charAt(0).toUpperCase() : ''}
+              {member.lastName ? member.lastName.charAt(0).toUpperCase() : ''}
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
-                {member.fullName}
-              </h2>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                  {member.fullName}
+                </h2>
+                {member.fullNameLatin && member.fullNameLatin !== member.fullName && (
+                  <span className="text-xs text-slate-400">
+                    ({member.fullNameLatin})
+                  </span>
+                )}
+              </div>
               <div className="flex items-center space-x-2 text-xs text-slate-500 dark:text-slate-400">
                 <span>Club Status: {member.status}</span>
                 <span>•</span>
@@ -147,6 +153,15 @@ export function TransactionModal({
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-bold ${
+                          tx.bank === 'TBC'
+                            ? 'bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-400 border border-sky-300 dark:border-sky-500/30'
+                            : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-400 border border-amber-300 dark:border-amber-500/30'
+                        }`}
+                      >
+                        {tx.bank || 'Bank'}
+                      </span>
                       <span className="text-base font-bold text-slate-900 dark:text-white">
                         {tx.amount.toLocaleString()} ₾
                       </span>

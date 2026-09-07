@@ -6,7 +6,7 @@ import {
 } from './types';
 
 /**
- * Exports reconciliation data into a beautifully formatted Excel (.xlsx) file.
+ * Exports multi-bank reconciliation data into an Excel (.xlsx) file.
  */
 export function exportReconciliationToExcel({
   reconciledMembers,
@@ -23,46 +23,50 @@ export function exportReconciliationToExcel({
 
   // 1. Summary Sheet
   const summaryRows = [
-    ['ОТЧЕТ ПО ЧЛЕНСКИМ ВЗНОСАМ И ВЫПИСКАМ'],
-    ['Дата генерации:', new Date().toLocaleString()],
-    ['Период:', selectedMonth === 'all' ? 'Все периоды' : selectedMonth],
+    ['MEMBERSHIP FEE & MULTI-BANK RECONCILIATION REPORT'],
+    ['Generated At:', new Date().toLocaleString()],
+    ['Period:', selectedMonth === 'all' ? 'All Periods' : selectedMonth],
     [],
-    ['ПОКАЗАТЕЛЬ', 'ЗНАЧЕНИЕ'],
-    ['Всего членов клуба', summary.totalActiveMembers],
-    ['С оплатой (Оплатили)', summary.paidCount],
-    ['Без оплаты (Не оплатили)', summary.unpaidCount],
-    ['Всего собрано (GEL)', summary.totalCollected],
-    ['Сопоставлено транзакций', summary.totalTransactionsCount],
-    ['Неопознанных транзакций', summary.unrecognizedCount],
-    ['Сумма неопознанных платежей (GEL)', summary.unrecognizedAmount],
+    ['METRIC', 'VALUE'],
+    ['Total Active Members', summary.totalActiveMembers],
+    ['Paid Members (Payment confirmed)', summary.paidCount],
+    ['Unpaid Members (0 GEL)', summary.unpaidCount],
+    ['Total Collected (GEL)', summary.totalCollected],
+    ['TBC Bank Collections (GEL)', summary.tbcCollected || 0],
+    ['Bank of Georgia (BOG) Collections (GEL)', summary.bogCollected || 0],
+    ['Total Matched Transactions', summary.totalTransactionsCount],
+    ['Unmatched Transactions Count', summary.unrecognizedCount],
+    ['Unmatched Amount (GEL)', summary.unrecognizedAmount],
   ];
 
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
-  wsSummary['!cols'] = [{ wch: 35 }, { wch: 25 }];
-  XLSX.utils.book_append_sheet(wb, wsSummary, 'Сводка');
+  wsSummary['!cols'] = [{ wch: 38 }, { wch: 25 }];
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
 
   // 2. Members Reconciliation Sheet
   const membersHeaders = [
-    'Имя',
-    'Фамилия',
-    'Полное имя',
-    'Статус в клубе',
-    'Поступило оплат (GEL)',
-    'Количество платежей',
-    'Статус оплаты',
-    'Даты платежей',
-    'Отправители в выписке',
-    'Детали транзакций',
+    'First Name',
+    'Last Name',
+    'Full Name',
+    'Club Status',
+    'Paid Amount (GEL)',
+    'Payment Count',
+    'Payment Status',
+    'Payment Dates',
+    'Banks (TBC/BOG)',
+    'Statement Senders',
+    'Transaction Details',
   ];
 
   const membersRows = reconciledMembers.map((r) => {
     const dates = r.transactions.map((t) => t.date).join(', ');
+    const banks = Array.from(new Set(r.transactions.map((t) => t.bank).filter(Boolean))).join(', ');
     const senders = r.transactions.map((t) => t.senderName || t.payerName).filter(Boolean).join('; ');
     const details = r.matchDetails
-      .map((d) => `[${d.transaction.date}] ${d.transaction.amount} GEL (${d.method} - ${Math.round(d.confidence * 100)}%)`)
+      .map((d) => `[${d.transaction.bank || 'Bank'} ${d.transaction.date}] ${d.transaction.amount} GEL (${d.method})`)
       .join('; ');
 
-    const statusLabel = r.status === 'paid' ? 'Оплачено' : 'Не оплачено';
+    const statusLabel = r.status === 'paid' ? 'Paid' : 'Unpaid';
 
     return [
       r.member.firstName,
@@ -73,6 +77,7 @@ export function exportReconciliationToExcel({
       r.paymentCount,
       statusLabel,
       dates,
+      banks,
       senders,
       details,
     ];
@@ -84,28 +89,30 @@ export function exportReconciliationToExcel({
     { wch: 18 },
     { wch: 24 },
     { wch: 14 },
-    { wch: 22 },
-    { wch: 20 },
+    { wch: 18 },
+    { wch: 16 },
     { wch: 16 },
     { wch: 24 },
+    { wch: 16 },
     { wch: 32 },
-    { wch: 45 },
+    { wch: 50 },
   ];
-  XLSX.utils.book_append_sheet(wb, wsMembers, 'Члены клуба');
+  XLSX.utils.book_append_sheet(wb, wsMembers, 'Club Members');
 
   // 3. Unrecognized Payments Sheet
   const unmatchedHeaders = [
-    'Дата',
-    'Сумма (GEL)',
-    'Отправитель (Грузинский)',
-    'Транслитерация (Латиница)',
-    'Код плательщика (ID)',
-    'Назначение платежа',
-    'Номер документа',
-    'Номер счета',
+    'Bank',
+    'Date',
+    'Amount (GEL)',
+    'Sender Name',
+    'Sender Transliterated',
+    'Payer ID Code',
+    'Payment Purpose',
+    'Document Number',
   ];
 
   const unmatchedRows = unrecognizedPayments.map((u) => [
+    u.transaction.bank || 'Other',
     u.transaction.date,
     u.transaction.amount,
     u.transaction.senderName || u.transaction.payerName,
@@ -113,21 +120,20 @@ export function exportReconciliationToExcel({
     u.transaction.payerId || '',
     u.transaction.purpose,
     u.transaction.docNumber || '',
-    u.transaction.account || '',
   ]);
 
   const wsUnmatched = XLSX.utils.aoa_to_sheet([unmatchedHeaders, ...unmatchedRows]);
   wsUnmatched['!cols'] = [
+    { wch: 12 },
     { wch: 14 },
     { wch: 14 },
     { wch: 32 },
     { wch: 32 },
     { wch: 20 },
-    { wch: 45 },
-    { wch: 16 },
-    { wch: 28 },
+    { wch: 50 },
+    { wch: 18 },
   ];
-  XLSX.utils.book_append_sheet(wb, wsUnmatched, 'Неопознанные платежи');
+  XLSX.utils.book_append_sheet(wb, wsUnmatched, 'Unmatched Payments');
 
   const filename = `Membership_Report_${selectedMonth === 'all' ? 'All' : selectedMonth}_${new Date().toISOString().split('T')[0]}.xlsx`;
   XLSX.writeFile(wb, filename);
